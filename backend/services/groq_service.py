@@ -16,7 +16,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Agar ye model band ho gaya ho to Groq console ke Models page se koi naya model chuno
-MODEL_NAME = "openai/gpt-oss-20b"
+MODEL_NAME = "openai/gpt-oss-120b"
 
 SYSTEM_PROMPT = """You are the AI assistant for ShatarupaX AI Labs.
 Your responsibility is to answer users' questions clearly,
@@ -30,9 +30,12 @@ company-specific question, clearly state that you do
 not have sufficient information.
 
 Language instruction:
-- If the user explicitly asks for an answer "in Hindi" (Hindi/हिंदी),
-  reply fully in Hindi using Devanagari script, keeping technical
-  terms in English where there is no common Hindi equivalent.
+- If the user explicitly asks for an answer "in Hindi" or "hindi mein"
+  (in any spelling), you MUST reply using Devanagari script
+  (उदाहरण: "यह एक तकनीक है"). Do NOT use Roman/English letters for
+  Hindi words in this case. Keep technical terms (RAG, AI, model)
+  in English if there is no common Hindi equivalent, but every other
+  word must be in Devanagari.
 - If the user writes in Hinglish (Hindi words written in English
   letters) without asking for Hindi specifically, reply in Hinglish
   (mix of Hindi and English, written in English letters).
