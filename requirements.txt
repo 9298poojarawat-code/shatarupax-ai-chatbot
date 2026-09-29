@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 streamlit
+groq
 requests
 python-dotenv
 pydantic
