@@ -1,14 +1,18 @@
 import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.models.schemas import ChatRequest, ChatResponse
-from backend.services.groq_service import get_chat_response, GroqServiceError
+from backend.services.groq_service import GroqServiceError, get_chat_response
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("shatarupax-chatbot")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(title="ShatarupaX AI Chatbot API")
+app = FastAPI(title="ShatarupaX AI Chatbot API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,16 +35,15 @@ def health():
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     try:
-        reply = get_chat_response(request.message)
-        return ChatResponse(response=reply)
-
+        answer = get_chat_response(
+            request.message, [m.model_dump() for m in request.history]
+        )
+        return ChatResponse(response=answer)
     except GroqServiceError as e:
-        logger.error(f"Groq service error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
-
+        raise HTTPException(status_code=e.status_code, detail=e.user_message)
     except Exception:
-        logger.exception("Unexpected error in /chat endpoint")
+        logger.exception("Unexpected error in /chat")
         raise HTTPException(
             status_code=500,
-            detail="Sorry, kuch galat ho gaya. Please try again."
+            detail="Sorry, I couldn't generate a response right now. Please try again.",
         )

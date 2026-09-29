@@ -1,23 +1,30 @@
+import logging
 import os
-import requests
+
 from dotenv import load_dotenv
+from groq import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AuthenticationError,
+    Groq,
+    RateLimitError,
+)
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "openai/gpt-oss-120b"
+logger = logging.getLogger(__name__)
+
+# Agar ye model band ho gaya ho to Groq console ke Models page se koi naya model chuno
+MODEL_NAME = "openai/gpt-oss-20b"
 
 SYSTEM_PROMPT = """You are the AI assistant for ShatarupaX AI Labs.
+Your responsibility is to answer users' questions clearly,
+professionally, and concisely.
 
-Your responsibility is to answer users' questions
-clearly, professionally, and concisely.
-
-Explain technical concepts in simple language whenever
-possible.
+Explain technical concepts in simple language whenever possible.
 
 Do not provide fabricated company information.
-
 If you do not have enough information to answer a
 company-specific question, clearly state that you do
 not have sufficient information.
@@ -29,52 +36,72 @@ Language instruction:
 - If the user writes in English, reply in English.
 - Match the user's language style naturally.
 
+Response length:
+- Keep answers under 150 words unless the user asks for more detail.
+
 Maintain a professional and helpful tone."""
 
 
 class GroqServiceError(Exception):
-    pass
+    """Error jisme user ko dikhane wala friendly message hota hai."""
+
+    def __init__(self, user_message: str, status_code: int = 500):
+        super().__init__(user_message)
+        self.user_message = user_message
+        self.status_code = status_code
 
 
-def get_chat_response(user_message: str) -> str:
-    if not GROQ_API_KEY:
-        raise GroqServiceError("GROQ_API_KEY nahi mili. .env file check karein.")
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message}
-        ],
-        "temperature": 0.7,
-        "max_tokens": 500
-    }
+def get_chat_response(message: str, history: list | None = None) -> str:
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        logger.error("GROQ_API_KEY .env file mein nahi mili")
+        raise GroqServiceError(
+            "Server configuration problem. Please try again later.", 500
+        )
 
     try:
-        response = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for item in (history or [])[-10:]:
+            messages.append({"role": item["role"], "content": item["content"]})
+        messages.append({"role": "user", "content": message})
 
-    except requests.exceptions.Timeout:
-        raise GroqServiceError("Groq API timeout ho gaya. Dobara try karein.")
+        client = Groq(api_key=api_key, timeout=20.0, max_retries=1)
+        completion = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            temperature=0.5,
+            max_tokens=600,
+        )
+        return completion.choices[0].message.content
 
-    except requests.exceptions.HTTPError as e:
-        status = e.response.status_code
-        if status == 401:
-            raise GroqServiceError("Invalid Groq API key.")
-        elif status == 429:
-            raise GroqServiceError("Rate limit exceeded. Thodi der baad try karein.")
-        else:
-            raise GroqServiceError(f"Groq API error (status {status}).")
-
-    except requests.exceptions.ConnectionError:
-        raise GroqServiceError("Groq API se connect nahi ho paaya. Internet check karein.")
-
-    except requests.exceptions.RequestException:
-        raise GroqServiceError("Kuch galat ho gaya Groq API call mein.")
+    except AuthenticationError:
+        logger.exception("Invalid Groq API key")
+        raise GroqServiceError(
+            "Sorry, I couldn't generate a response right now. Please try again.", 500
+        )
+    except RateLimitError:
+        logger.exception("Groq rate limit reached")
+        raise GroqServiceError(
+            "Too many requests right now. Please try again in a moment.", 429
+        )
+    except APITimeoutError:
+        logger.exception("Groq request timed out")
+        raise GroqServiceError(
+            "The response is taking too long. Please try again.", 504
+        )
+    except APIConnectionError:
+        logger.exception("Could not connect to Groq")
+        raise GroqServiceError(
+            "Unable to reach the AI service. Please check your connection and try again.",
+            503,
+        )
+    except APIStatusError:
+        logger.exception("Groq API returned an error status")
+        raise GroqServiceError(
+            "Sorry, I couldn't generate a response right now. Please try again.", 502
+        )
+    except Exception:
+        logger.exception("Unexpected error in groq_service")
+        raise GroqServiceError(
+            "Sorry, I couldn't generate a response right now. Please try again.", 500
+        )
